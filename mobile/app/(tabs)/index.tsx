@@ -1,25 +1,31 @@
-import React, { useState, useEffect } from "react";
-import { timeAgo } from "../utils/timeAgo";
+import React, { useCallback, useEffect, useState } from "react";
 import {
+  ActivityIndicator,
+  FlatList,
+  KeyboardAvoidingView,
+  Linking,
+  Platform,
   SafeAreaView,
-  View,
   Text,
   TextInput,
-  FlatList,
   TouchableOpacity,
-  KeyboardAvoidingView,
-  Platform,
-  Linking,
+  View,
 } from "react-native";
 
+import { interactiveLogin, ensureValidSession, refreshSessionToken } from "@/src/auth/api";
+import {
+  SessionTokens,
+  clearConversation,
+  clearSession,
+  getConversationId,
+  saveConversationId,
+} from "@/src/auth/session";
+import { getBackendBaseUrl } from "@/src/auth/config";
 import { chatStyles as styles } from "../styles/chatStyles";
+import { timeAgo } from "../utils/timeAgo";
 
-// Backend URL
-// const BACKEND_URL = "http://10.0.2.2:8000/chat"; // in the laptop, run with emulator
-const BACKEND_URL = "http://192.168.1.34:8000/chat"; // run in the mobile phone
-
-// Limits
 const MAX_MESSAGE_LENGTH = 1500;
+const CHAT_URL = `${getBackendBaseUrl()}/chat`;
 
 // =============================
 // Types aligned with backend
@@ -75,6 +81,10 @@ export default function Page() {
   const [isSending, setIsSending] = useState(false);
   const [tick, setTick] = useState(0);
   const [hasLoadedIntro, setHasLoadedIntro] = useState(false);
+  const [authenticating, setAuthenticating] = useState(false);
+  const [session, setSession] = useState<SessionTokens | null>(null);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   // Re-render timeAgo() every 60 seconds
   useEffect(() => {
@@ -84,21 +94,44 @@ export default function Page() {
     return () => clearInterval(id);
   }, []);
 
-  // Load intro message on first app open
+  const syncConversationId = useCallback(async () => {
+    const stored = await getConversationId();
+    if (stored) {
+      setConversationId(stored);
+    }
+  }, []);
+
+  useEffect(() => {
+    const bootstrap = async () => {
+      try {
+        await syncConversationId();
+        const validSession = await ensureValidSession();
+        if (validSession) {
+          setSession(validSession);
+          setAuthError(null);
+        }
+      } catch (error) {
+        setAuthError("Sign-in required to start chatting.");
+      }
+    };
+
+    bootstrap();
+  }, [syncConversationId]);
+
+  // Load intro message after authentication
   useEffect(() => {
     const loadIntroMessage = async () => {
-      if (hasLoadedIntro) return;
-      
-      try {
-        // Send empty message to trigger Copilot's intro
-        const response = await fetch(BACKEND_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: "" }), // Empty to get intro
-        });
+      if (hasLoadedIntro || !session) return;
 
+      try {
+        const response = await sendChatRequest({ message: "" });
         const data = await response.json();
-        
+
+        if (data.conversation_id) {
+          setConversationId(data.conversation_id);
+          await saveConversationId(data.conversation_id);
+        }
+
         if (data.reply) {
           const introMessage: Message = {
             id: "intro-" + Date.now(),
@@ -109,17 +142,83 @@ export default function Page() {
           };
           setMessages([introMessage]);
         }
-        
+      } catch {
+        setAuthError("Could not load intro message.");
+      } finally {
         setHasLoadedIntro(true);
-      } catch (error) {
-        console.error("Failed to load intro:", error);
-        setHasLoadedIntro(true); // Don't retry on error
       }
     };
 
     loadIntroMessage();
-  }, [hasLoadedIntro]);
-  
+  }, [hasLoadedIntro, session]);
+
+  const ensureSession = useCallback(async (): Promise<SessionTokens> => {
+    try {
+      const valid = await ensureValidSession();
+      if (valid) {
+        setSession(valid);
+        setAuthError(null);
+        return valid;
+      }
+
+      setAuthenticating(true);
+      const fresh = await interactiveLogin();
+      setSession(fresh);
+      setAuthError(null);
+      return fresh;
+    } catch (error) {
+      setAuthError("Sign-in was cancelled or failed.");
+      throw error;
+    } finally {
+      setAuthenticating(false);
+    }
+  }, []);
+
+  const handleUnauthorized = useCallback(async () => {
+    setSession(null);
+    await clearSession();
+    await clearConversation();
+    setAuthError("Session expired. Please sign in again.");
+  }, []);
+
+  const sendChatRequest = useCallback(
+    async (body: Record<string, unknown>) => {
+      const activeSession = await ensureSession();
+      const applyAuth = (token: string) =>
+        fetch(CHAT_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            ...body,
+            conversation_id: conversationId ?? undefined,
+          }),
+        });
+
+      let response = await applyAuth(activeSession.sessionJwt);
+
+      if (response.status === 401 && activeSession.refreshToken) {
+        try {
+          const refreshed = await refreshSessionToken(activeSession.refreshToken);
+          setSession(refreshed);
+          response = await applyAuth(refreshed.sessionJwt);
+        } catch {
+          await handleUnauthorized();
+          throw new Error("Session refresh failed.");
+        }
+      }
+
+      if (response.status === 401) {
+        await handleUnauthorized();
+        throw new Error("Session is not authorized.");
+      }
+
+      return response;
+    },
+    [conversationId, ensureSession, handleUnauthorized]
+  );
 
   // =============================================
   // SEND MESSAGE TO BACKEND
@@ -143,14 +242,14 @@ export default function Page() {
     setIsSending(true);
 
     try {
-      const response = await fetch(BACKEND_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: trimmed }),
-      });
-
+      const response = await sendChatRequest({ message: trimmed });
       const data = await response.json();
       const baseId = Date.now().toString();
+
+      if (data.conversation_id) {
+        setConversationId(data.conversation_id);
+        await saveConversationId(data.conversation_id);
+      }
 
       const botMessage: Message = {
         id: baseId + "-bot",
@@ -184,7 +283,7 @@ export default function Page() {
       const errorMessage: Message = {
         id: Date.now().toString() + "-err",
         from: "bot",
-        text: "Server error. Check backend.",
+        text: authError || "Server error. Check backend.",
         timestamp: new Date().toISOString(),
         kind: "normal",
       };
@@ -438,53 +537,90 @@ export default function Page() {
   // =============================================
   const inputTooLong = input.length > MAX_MESSAGE_LENGTH;
 
+  const renderAuthState = () => {
+    if (authenticating) {
+      return (
+        <View style={[styles.list, { flex: 1, justifyContent: "center" }]}>
+          <ActivityIndicator />
+          <Text style={{ marginTop: 12 }}>Signing in with Microsoft Entra…</Text>
+        </View>
+      );
+    }
+
+    if (!session) {
+      return (
+        <View style={[styles.list, { flex: 1, justifyContent: "center" }]}>
+          <Text style={{ marginBottom: 12, fontWeight: "600" }}>
+            Sign in with Microsoft Entra to start chatting.
+          </Text>
+          {authError ? (
+            <Text style={{ color: "#dc2626", marginBottom: 8 }}>{authError}</Text>
+          ) : null}
+          <TouchableOpacity
+            onPress={() => ensureSession().catch(() => null)}
+            style={styles.button}
+          >
+            <Text style={styles.buttonText}>Sign in with Microsoft</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    return null;
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
         style={styles.container}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <FlatList
-          data={messages}
-          keyExtractor={(item) => item.id}
-          renderItem={renderItem}
-          contentContainerStyle={styles.list}
-          extraData={tick}
-        />
-
-        <View style={styles.inputRow}>
-          <View style={{ flex: 1 }}>
-            <TextInput
-              style={styles.input}
-              value={input}
-              onChangeText={setInput}
-              placeholder="Type a message..."
-              multiline
+        {renderAuthState() ?? (
+          <>
+            <FlatList
+              data={messages}
+              keyExtractor={(item) => item.id}
+              renderItem={renderItem}
+              contentContainerStyle={styles.list}
+              extraData={tick}
             />
 
-            <Text
-              style={[
-                styles.charCount,
-                inputTooLong && styles.charCountExceeded,
-              ]}
-            >
-              {input.length}/{MAX_MESSAGE_LENGTH}
-              {inputTooLong ? " – too long" : ""}
-            </Text>
-          </View>
+            <View style={styles.inputRow}>
+              <View style={{ flex: 1 }}>
+                <TextInput
+                  style={styles.input}
+                  value={input}
+                  onChangeText={setInput}
+                  placeholder="Type a message..."
+                  multiline
+                  editable={!!session}
+                />
 
-          <TouchableOpacity
-            onPress={sendMessage}
-            disabled={!input.trim() || isSending || inputTooLong}
-            style={[
-              styles.button,
-              (!input.trim() || isSending || inputTooLong) &&
-                styles.buttonDisabled,
-            ]}
-          >
-            <Text style={styles.buttonText}>{isSending ? "..." : "Send"}</Text>
-          </TouchableOpacity>
-        </View>
+                <Text
+                  style={[
+                    styles.charCount,
+                    inputTooLong && styles.charCountExceeded,
+                  ]}
+                >
+                  {input.length}/{MAX_MESSAGE_LENGTH}
+                  {inputTooLong ? " – too long" : ""}
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                onPress={sendMessage}
+                disabled={!input.trim() || isSending || inputTooLong || !session}
+                style={[
+                  styles.button,
+                  (!input.trim() || isSending || inputTooLong || !session) &&
+                    styles.buttonDisabled,
+                ]}
+              >
+                <Text style={styles.buttonText}>{isSending ? "..." : "Send"}</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
