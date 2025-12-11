@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 # Import Copilot service
 from copilot_service import get_copilot_service
+from auth_service import auth_router
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -26,6 +27,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Auth routes
+app.include_router(auth_router)
 # -------------------------------------------------------------------
 # SETTINGS
 # -------------------------------------------------------------------

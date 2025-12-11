@@ -6,3 +6,9 @@ msal
 aiohttp
 microsoft-agents-activity
 microsoft-agents-copilotstudio-client
+azure-identity
+azure-keyvault-secrets
+pyjwt[crypto]
+cryptography
+httpx
+pytest
