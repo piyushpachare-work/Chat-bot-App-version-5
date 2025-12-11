@@ -1,0 +1,139 @@
+/**
+ * OpenAPI/Swagger Documentation
+ * Complete API documentation with security schemes
+ */
+
+import swaggerJsdoc from 'swagger-jsdoc';
+
+const options: swaggerJsdoc.Options = {
+  definition: {
+    openapi: '3.0.0',
+    info: {
+      title: 'Version 5 Chatbot API',
+      version: '5.0.0',
+      description: 'Chatbot application using Microsoft Entra ID OIDC and Microsoft 365 Agents SDK',
+      contact: {
+        name: 'API Support',
+      },
+    },
+    servers: [
+      {
+        url: 'http://localhost:3000',
+        description: 'Development server',
+      },
+      {
+        url: 'https://api.example.com',
+        description: 'Production server',
+      },
+    ],
+    components: {
+      securitySchemes: {
+        OAuth2: {
+          type: 'oauth2',
+          flows: {
+            authorizationCode: {
+              authorizationUrl: 'https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/authorize',
+              tokenUrl: 'https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token',
+              scopes: {
+                'https://graph.microsoft.com/.default': 'Access Microsoft Graph API',
+              },
+            },
+          },
+        },
+        BearerJWT: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          description: 'JWT token obtained from OAuth2 authentication',
+        },
+      },
+      schemas: {
+        Error: {
+          type: 'object',
+          properties: {
+            error: {
+              type: 'string',
+              description: 'Error type',
+            },
+            message: {
+              type: 'string',
+              description: 'Error message',
+            },
+          },
+          required: ['error', 'message'],
+        },
+        ChatMessage: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              description: 'Message ID',
+            },
+            role: {
+              type: 'string',
+              enum: ['user', 'assistant'],
+              description: 'Message role',
+            },
+            content: {
+              type: 'string',
+              description: 'Message content',
+            },
+            timestamp: {
+              type: 'string',
+              format: 'date-time',
+              description: 'Message timestamp',
+            },
+          },
+          required: ['id', 'role', 'content', 'timestamp'],
+        },
+        ChatSession: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              description: 'Session ID',
+            },
+            createdAt: {
+              type: 'string',
+              format: 'date-time',
+            },
+            updatedAt: {
+              type: 'string',
+              format: 'date-time',
+            },
+          },
+        },
+        HealthStatus: {
+          type: 'object',
+          properties: {
+            status: {
+              type: 'string',
+              example: 'healthy',
+            },
+            timestamp: {
+              type: 'string',
+              format: 'date-time',
+            },
+          },
+        },
+      },
+    },
+    tags: [
+      {
+        name: 'Authentication',
+        description: 'OIDC authentication endpoints',
+      },
+      {
+        name: 'Chat',
+        description: 'Chatbot interaction endpoints',
+      },
+      {
+        name: 'Health',
+        description: 'Health check endpoints',
+      },
+    ],
+  },
+  apis: ['./src/routes/*.ts', './src/server/app.ts'],
+};
+
+export const swaggerSpec = swaggerJsdoc(options);

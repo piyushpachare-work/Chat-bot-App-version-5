@@ -1,0 +1,230 @@
+# Authentication Architecture
+
+## Overview
+
+This document describes the authentication architecture for Version 5 Chatbot App, including PKCE flow, token exchange, session management, and backend-to-Copilot service integration.
+
+## Authentication Flow
+
+The application uses Microsoft Entra ID OIDC (OpenID Connect) with PKCE (Proof Key for Code Exchange) for secure authentication.
+
+## PKCE Flow Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Frontend
+    participant Backend
+    participant EntraID
+    participant KeyVault
+    participant CopilotService
+
+    User->>Frontend: Access Application
+    Frontend->>Backend: GET /auth/login
+    
+    Backend->>Backend: Generate PKCE codes<br/>(code_verifier, code_challenge)
+    Backend->>Backend: Store code_verifier<br/>(keyed by state)
+    Backend->>Backend: Generate state parameter
+    Backend->>Backend: Set auth_state cookie
+    
+    Backend-->>Frontend: 302 Redirect to Entra ID<br/>(with code_challenge & state)
+    Frontend->>EntraID: Redirect to login
+    
+    EntraID->>User: Show login form
+    User->>EntraID: Enter credentials
+    EntraID->>EntraID: Validate credentials
+    
+    EntraID-->>Frontend: 302 Redirect to callback<br/>(with code & state)
+    Frontend->>Backend: GET /auth/callback?code=xxx&state=yyy
+    
+    Backend->>Backend: Validate state parameter
+    Backend->>Backend: Retrieve code_verifier<br/>(using state)
+    Backend->>EntraID: Exchange code for token<br/>(POST with code_verifier)
+    
+    EntraID-->>Backend: Access Token + ID Token
+    Backend->>KeyVault: Store refresh token securely
+    Backend->>Backend: Initialize Graph Client
+    Backend->>Backend: Create session
+    Backend->>Backend: Generate session JWT
+    Backend-->>Frontend: Set session_id cookie<br/>Redirect to app
+```
+
+## Token Exchange Sequence
+
+```mermaid
+sequenceDiagram
+    participant Backend
+    participant EntraID
+    participant KeyVault
+    participant Cache
+
+    Backend->>EntraID: POST /token<br/>grant_type=authorization_code<br/>code=xxx<br/>code_verifier=yyy
+    
+    EntraID-->>Backend: access_token, id_token,<br/>refresh_token, expires_in
+    
+    Backend->>KeyVault: setSecret("refresh-token-{userId}", refresh_token)
+    Backend->>Cache: Cache access_token (TTL: expires_in)
+    
+    Note over Backend: Access token used for API calls<br/>Refresh token stored in Key Vault<br/>for secure rotation
+```
+
+## Session JWT Management
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Frontend
+    participant Backend
+    participant KeyVault
+
+    User->>Frontend: Authenticated Request
+    Frontend->>Backend: Request with session_id cookie
+    
+    Backend->>Backend: Validate session JWT signature
+    Backend->>Backend: Check JWT expiration
+    Backend->>Backend: Extract user info from JWT
+    
+    alt JWT Expired
+        Backend->>KeyVault: getSecret("refresh-token-{userId}")
+        KeyVault-->>Backend: refresh_token
+        Backend->>EntraID: POST /token<br/>grant_type=refresh_token
+        EntraID-->>Backend: New access_token + refresh_token
+        Backend->>KeyVault: Update refresh_token
+        Backend->>Backend: Issue new session JWT
+        Backend-->>Frontend: Continue with new session
+    else JWT Valid
+        Backend-->>Frontend: Process request
+    end
+```
+
+## Backend to Copilot Service Integration
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Backend
+    participant KeyVault
+    participant GraphClient
+    participant CopilotService
+
+    User->>Backend: POST /chat/message
+    
+    Backend->>Backend: Validate session JWT
+    Backend->>KeyVault: getSecret("access-token-{userId}")
+    
+    alt Token in Cache
+        KeyVault-->>Backend: Cached access_token
+    else Token Not in Cache
+        Backend->>KeyVault: getSecret("refresh-token-{userId}")
+        KeyVault-->>Backend: refresh_token
+        Backend->>EntraID: Refresh access token
+        EntraID-->>Backend: New access_token
+        Backend->>KeyVault: Cache new access_token
+    end
+    
+    Backend->>GraphClient: Initialize with access_token
+    Backend->>CopilotService: processQuery(message, context)
+    CopilotService->>GraphClient: API calls (if needed)
+    GraphClient-->>CopilotService: Data
+    CopilotService-->>Backend: Processed response
+    Backend-->>User: Chat response
+```
+
+## Security Considerations
+
+### PKCE Implementation
+
+- **Code Verifier**: Cryptographically random string (43-128 characters)
+- **Code Challenge**: SHA256 hash of code verifier (base64url encoded)
+- **Storage**: Code verifier stored server-side, keyed by state parameter
+- **Validation**: State parameter validated on callback to prevent CSRF
+
+### Token Storage
+
+- **Access Tokens**: Cached in-memory with TTL (never logged)
+- **Refresh Tokens**: Stored in Azure Key Vault (encrypted at rest)
+- **Session JWTs**: Signed with HS256, stored in HTTP-only cookies
+
+### Secret Management
+
+- All secrets retrieved from Azure Key Vault in production
+- Fallback to environment variables in development
+- Secrets never exposed in logs or error messages
+- Automatic rotation supported via Key Vault
+
+## API Endpoints
+
+### Authentication Endpoints
+
+- `GET /auth/login` - Initiates PKCE flow
+- `GET /auth/callback` - Handles OIDC callback
+- `POST /auth/logout` - Invalidates session
+
+### Protected Endpoints
+
+All chat endpoints require valid session:
+- `POST /chat/message` - Send message
+- `GET /chat/history` - Get chat history
+- `DELETE /chat/session` - Clear session
+
+## Configuration
+
+### Required Environment Variables
+
+```bash
+AZURE_CLIENT_ID=<app-registration-client-id>
+AZURE_TENANT_ID=<azure-ad-tenant-id>
+AZURE_KEY_VAULT_URL=https://<vault-name>.vault.azure.net/
+AZURE_REDIRECT_URI=https://your-app.com/auth/callback
+```
+
+### Key Vault Secrets
+
+- `azure-client-secret` - Application client secret
+- `refresh-token-{userId}` - Per-user refresh tokens
+- `signing-key` - JWT signing key (optional, can use HS256 with env var)
+
+## Session Management
+
+### Session JWT Structure
+
+```json
+{
+  "userId": "user-id-from-entra-id",
+  "sessionId": "session-uuid",
+  "exp": 1234567890,
+  "iat": 1234567890,
+  "iss": "version-5-chatbot-app"
+}
+```
+
+### Cookie Configuration
+
+- **Name**: `session_id`
+- **HttpOnly**: true (prevents XSS)
+- **Secure**: true (HTTPS only in production)
+- **SameSite**: strict (prevents CSRF)
+- **MaxAge**: 3600 seconds (1 hour)
+
+## Token Refresh Strategy
+
+1. Access tokens cached with expiration time
+2. On expiration, refresh token retrieved from Key Vault
+3. New access token obtained from Entra ID
+4. New access token cached
+5. Refresh token updated in Key Vault if rotated
+
+## Error Handling
+
+All authentication errors:
+- Never expose tokens or secrets
+- Use generic error messages in production
+- Log detailed errors server-side (sanitized)
+- Return appropriate HTTP status codes
+
+## Compliance
+
+- **OIDC 1.0** compliant
+- **PKCE RFC 7636** compliant
+- **OWASP** security guidelines followed
+- **GDPR** compliant (no PII in logs)
