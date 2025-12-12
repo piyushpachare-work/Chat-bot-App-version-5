@@ -6,6 +6,7 @@
 import { ConfidentialClientApplication, AuthenticationResult, CryptoProvider } from '@azure/msal-node';
 import { getAppConfigSync } from '../config/app-config.js';
 import { createLogger } from '../utils/logger.js';
+import jwt from 'jsonwebtoken';
 
 const logger = createLogger();
 
@@ -163,6 +164,90 @@ export class EntraIdAuthService {
         error: error instanceof Error ? error.message : 'Unknown error',
       });
       throw new Error('Failed to acquire access token');
+    }
+  }
+
+  /**
+   * Exchanges authorization code for session using PKCE
+   * Validates id_token claims (iss/exp/aud) and returns token response
+   * @param code - Authorization code from OAuth callback
+   * @param codeVerifier - PKCE code verifier
+   * @param redirectUri - Redirect URI used in authorization request
+   * @returns Authentication result with tokens
+   */
+  async exchangeCodeForSession(
+    code: string,
+    codeVerifier: string,
+    redirectUri: string
+  ): Promise<AuthenticationResult> {
+    try {
+      const tokenRequest = {
+        code,
+        scopes: [this.config.azure.scope],
+        redirectUri,
+        codeVerifier,
+      };
+
+      const response = await this.msalClient.acquireTokenByCode(tokenRequest);
+
+      if (!response) {
+        throw new Error('No authentication result received');
+      }
+
+      // Validate id_token claims
+      if (response.idToken) {
+        this.validateIdTokenClaims(response.idToken);
+      }
+
+      logger.info('Successfully exchanged code for session');
+      return response;
+    } catch (error) {
+      logger.error('Failed to exchange code for session', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      throw new Error('Failed to exchange authorization code for session');
+    }
+  }
+
+  /**
+   * Validates id_token claims (iss, exp, aud)
+   * @param idToken - ID token to validate
+   * @throws Error if validation fails
+   */
+  private validateIdTokenClaims(idToken: string): void {
+    try {
+      // Decode without verification first to check claims
+      const decoded = jwt.decode(idToken, { complete: true });
+      
+      if (!decoded || typeof decoded === 'string' || !decoded.payload) {
+        throw new Error('Invalid id_token format');
+      }
+
+      const payload = decoded.payload as jwt.JwtPayload;
+      const expectedIssuer = `https://login.microsoftonline.com/${this.config.azure.tenantId}/v2.0`;
+      const expectedAudience = this.config.azure.clientId;
+
+      // Validate issuer
+      if (payload.iss !== expectedIssuer) {
+        throw new Error(`Invalid issuer: expected ${expectedIssuer}, got ${payload.iss}`);
+      }
+
+      // Validate audience
+      if (payload.aud !== expectedAudience) {
+        throw new Error(`Invalid audience: expected ${expectedAudience}, got ${payload.aud}`);
+      }
+
+      // Validate expiration
+      if (!payload.exp || payload.exp < Math.floor(Date.now() / 1000)) {
+        throw new Error('ID token has expired');
+      }
+
+      logger.debug('ID token claims validated successfully');
+    } catch (error) {
+      logger.error('ID token validation failed', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      throw error;
     }
   }
 
