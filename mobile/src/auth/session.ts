@@ -87,6 +87,15 @@ export async function getAuthToken(): Promise<string | null> {
   return session.sessionJwt;
 }
 
+/**
+ * Returns the Authorization header value for authenticated requests.
+ * @returns Authorization header string (e.g., "Bearer <token>") or null if no valid session
+ */
+export async function getAuthHeader(): Promise<string | null> {
+  const token = await getAuthToken();
+  return token ? `Bearer ${token}` : null;
+}
+
 export async function saveConversationId(conversationId: string): Promise<void> {
   await AsyncStorage.setItem("conversation_id", conversationId);
 }

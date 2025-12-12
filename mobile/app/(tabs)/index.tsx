@@ -12,7 +12,7 @@ import {
   View,
 } from "react-native";
 
-import { interactiveLogin, ensureValidSession, refreshSessionToken } from "@/src/auth/api";
+import { interactiveLogin, ensureValidSession, authenticatedFetch } from "@/src/auth/api";
 import {
   SessionTokens,
   clearConversation,
@@ -183,33 +183,26 @@ export default function Page() {
 
   const sendChatRequest = useCallback(
     async (body: Record<string, unknown>) => {
-      const activeSession = await ensureSession();
-      const applyAuth = (token: string) =>
-        fetch(CHAT_URL, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            ...body,
-            conversation_id: conversationId ?? undefined,
-          }),
-        });
+      await ensureSession();
+      
+      const response = await authenticatedFetch(CHAT_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...body,
+          conversation_id: conversationId ?? undefined,
+        }),
+      });
 
-      let response = await applyAuth(activeSession.sessionJwt);
-
-      if (response.status === 401 && activeSession.refreshToken) {
-        try {
-          const refreshed = await refreshSessionToken(activeSession.refreshToken);
-          setSession(refreshed);
-          response = await applyAuth(refreshed.sessionJwt);
-        } catch {
-          await handleUnauthorized();
-          throw new Error("Session refresh failed.");
-        }
+      // Update session state if it was refreshed during the fetch
+      const updatedSession = await ensureValidSession();
+      if (updatedSession) {
+        setSession(updatedSession);
       }
 
+      // If still unauthorized after refresh attempt, clear session
       if (response.status === 401) {
         await handleUnauthorized();
         throw new Error("Session is not authorized.");

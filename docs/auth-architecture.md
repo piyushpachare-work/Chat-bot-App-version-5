@@ -206,13 +206,113 @@ AZURE_REDIRECT_URI=https://your-app.com/auth/callback
 - **SameSite**: strict (prevents CSRF)
 - **MaxAge**: 3600 seconds (1 hour)
 
+## Mobile App Session Token Flow
+
+The mobile app uses Authorization Code + PKCE flow to obtain session JWTs from the middleware, stores them securely, and includes them in API requests.
+
+### Mobile PKCE Flow Sequence
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Mobile
+    participant SystemBrowser
+    participant EntraID
+    participant Middleware
+    participant Backend
+
+    User->>Mobile: Initiate login
+    Mobile->>Mobile: Generate PKCE pair<br/>(code_verifier, code_challenge)
+    Mobile->>SystemBrowser: Open authorization URL<br/>(with code_challenge)
+    SystemBrowser->>EntraID: Redirect to login
+    EntraID->>User: Show login form
+    User->>EntraID: Enter credentials
+    EntraID->>SystemBrowser: Redirect with authorization code
+    SystemBrowser->>Mobile: Return with code
+    Mobile->>Middleware: POST /auth/callback<br/>{code, code_verifier, redirect_uri}
+    Middleware->>EntraID: Exchange code for tokens
+    EntraID-->>Middleware: Access token + refresh token
+    Middleware->>Middleware: Generate session JWT
+    Middleware-->>Mobile: {session_jwt, refresh_token, expires_at}
+    Mobile->>Mobile: Store tokens securely<br/>(expo SecureStore)
+```
+
+### Mobile Session Management
+
+```mermaid
+sequenceDiagram
+    participant Mobile
+    participant SecureStore
+    participant Middleware
+    participant Backend
+
+    Mobile->>SecureStore: Read session_token
+    SecureStore-->>Mobile: session_token
+    Mobile->>Backend: POST /chat<br/>Authorization: Bearer <session_token>
+    
+    alt Session Token Valid
+        Backend-->>Mobile: 200 OK with response
+    else Session Token Expired (401)
+        Mobile->>SecureStore: Read refresh_token
+        SecureStore-->>Mobile: refresh_token
+        Mobile->>Middleware: POST /auth/refresh<br/>{refresh_token}
+        Middleware->>Middleware: Validate refresh token
+        Middleware->>Middleware: Generate new session JWT
+        Middleware-->>Mobile: {session_jwt, refresh_token, expires_at}
+        Mobile->>SecureStore: Update tokens<br/>(single-use replacement)
+        Mobile->>Backend: Retry POST /chat<br/>Authorization: Bearer <new_session_token>
+        Backend-->>Mobile: 200 OK with response
+    else Refresh Failed
+        Mobile->>SecureStore: Clear all tokens
+        Mobile-->>User: Prompt for re-authentication
+    end
+```
+
+### Mobile Token Storage
+
+- **Session JWT**: Stored in `expo-secure-store` with key `session_jwt`
+- **Refresh Token**: Stored in `expo-secure-store` with key `refresh_token`
+- **Expiration**: Stored in `expo-secure-store` with key `session_exp` (timestamp in milliseconds)
+- **Security**: All tokens stored using Expo SecureStore (encrypted storage, keychain on iOS, Keystore on Android)
+
+### Mobile API Integration
+
+The mobile app uses an `authenticatedFetch` wrapper that:
+1. Automatically adds `Authorization: Bearer <session_token>` header to requests
+2. Detects 401 Unauthorized responses
+3. Automatically refreshes the session token using the stored refresh token
+4. Retries the original request with the new session token
+5. Handles single-use refresh token replacement (middleware returns new refresh_token)
+6. Clears session on refresh failure and prompts for re-authentication
+
+### Mobile Configuration
+
+Required environment variables (set in `mobile/.env` or `app.json`):
+```bash
+EXPO_PUBLIC_BACKEND_URL=https://your-middleware.com
+EXPO_PUBLIC_ENTRA_CLIENT_ID=<app-registration-client-id>
+EXPO_PUBLIC_ENTRA_TENANT_ID=<azure-ad-tenant-id>
+EXPO_PUBLIC_ENTRA_SCOPES=openid,profile,offline_access
+```
+
+**Note**: The mobile app does NOT store client secrets. All authentication uses PKCE flow which does not require client secrets.
+
 ## Token Refresh Strategy
 
+### Web/Backend
 1. Access tokens cached with expiration time
 2. On expiration, refresh token retrieved from Key Vault
 3. New access token obtained from Entra ID
 4. New access token cached
 5. Refresh token updated in Key Vault if rotated
+
+### Mobile
+1. Session JWT stored in SecureStore with expiration
+2. On 401 response, refresh token retrieved from SecureStore
+3. Refresh token sent to middleware `/auth/refresh` endpoint
+4. Middleware validates and returns new session JWT + refresh token
+5. New tokens stored in SecureStore (single-use replacement)
+6. Original request retried with new session JWT
 
 ## Error Handling
 
