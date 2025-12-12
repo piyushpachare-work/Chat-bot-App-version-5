@@ -67,6 +67,25 @@ const sanitizeFormatter = winston.format((info) => {
 });
 
 /**
+ * Pulls requestId up to top-level log fields when present in metadata.
+ */
+const requestIdFormatter = winston.format((info) => {
+  const requestId =
+    (info.requestId as string | undefined) ||
+    ((info.metadata as Record<string, unknown> | undefined)?.requestId as string | undefined);
+
+  if (requestId) {
+    info.requestId = requestId;
+    info.metadata = {
+      ...(info.metadata as Record<string, unknown> | undefined),
+      requestId,
+    };
+  }
+
+  return info;
+});
+
+/**
  * Creates and configures the Winston logger instance
  * @param level - Log level (default: 'info')
  * @returns Configured Winston logger
@@ -75,6 +94,7 @@ export function createLogger(level: string = 'info'): winston.Logger {
   return winston.createLogger({
     level,
     format: winston.format.combine(
+      requestIdFormatter(),
       sanitizeFormatter(),
       winston.format.timestamp(),
       winston.format.errors({ stack: true }),

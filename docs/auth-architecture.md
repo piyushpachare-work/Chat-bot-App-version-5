@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the authentication architecture for Version 5 Chatbot App, including PKCE flow, token exchange, session management, and backend-to-Copilot service integration.
+This document describes the authentication architecture for Version 5 Chatbot App, including PKCE flow, token exchange, session management, backend-to-Copilot service integration, and how request identifiers flow through the stack for traceable logging.
 
 ## Authentication Flow
 
@@ -177,7 +177,13 @@ AZURE_TENANT_ID=<azure-ad-tenant-id>
 AZURE_KEY_VAULT_URL=https://<vault-name>.vault.azure.net/
 AZURE_REDIRECT_URI=https://your-app.com/auth/callback
 SESSION_SIGNING_KEY=<secret-key-min-32-characters-for-hs256-jwt-signing>
+COPILOTSTUDIOAGENT__ENVIRONMENTID=<copilot-environment-id>
+COPILOTSTUDIOAGENT__SCHEMANAME=<copilot-schema-name>
+COPILOTSTUDIOAGENT__AGENTAPPID=<copilot-agent-app-id>
+COPILOTSTUDIOAGENT__TENANTID=<copilot-tenant-id>
 ```
+
+Use the provided `.env.example` files in the project root, `src/`, and `backend/` as templates to keep development and CI aligned.
 
 ### Key Vault Secrets
 
