@@ -2,15 +2,18 @@ from typing import Optional, Dict, Any, List
 import datetime
 import json
 import logging
+import os
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+import jwt
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 
 # Import Copilot service
 from copilot_service import get_copilot_service
-from auth_service import auth_router
+from auth_service import auth_router, auth_service
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -19,16 +22,49 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
+# CORS configuration - environment-driven allowlist
+cors_origins_env = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
+cors_origins = [origin.strip() for origin in cors_origins_env.split(",") if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # Auth routes
 app.include_router(auth_router)
+
+# Security scheme for Bearer token
+security = HTTPBearer()
+
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+) -> Dict[str, Any]:
+    """
+    Verify session JWT and return user payload.
+    Raises HTTPException 401 if token is missing, invalid, or expired.
+    """
+    token = credentials.credentials
+    
+    try:
+        payload = auth_service.decode_session_jwt(token)
+        # Extract user_id from 'sub' claim (subject)
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token: missing 'sub' claim")
+        return payload
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError as e:
+        logger.warning(f"Invalid token: {e}")
+        raise HTTPException(status_code=401, detail="Invalid token")
+    except Exception as e:
+        logger.error(f"Token verification error: {e}")
+        raise HTTPException(status_code=401, detail="Token verification failed")
 # -------------------------------------------------------------------
 # SETTINGS
 # -------------------------------------------------------------------
@@ -62,9 +98,9 @@ class LearningPlan(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     timestamp: str = Field(
-        default_factory=lambda: datetime.datetime.utcnow()
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
         .replace(microsecond=0)
-        .isoformat() + "Z"
+        .isoformat()
     )
     agent_activity: Optional[Dict[str, Any]] = None
     learning_plan: Optional[LearningPlan] = None
@@ -241,7 +277,7 @@ def build_agent_activity(plan: LearningPlan) -> Dict[str, Any]:
     return {
         "id": f"activity-{plan.topic.lower().replace(' ', '-')}",
         "type": "message",
-        "timestamp": datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat(),
         "serviceUrl": "https://example.contoso.com",
         "channelId": "webchat",
         "conversation": {
@@ -363,24 +399,29 @@ async def health():
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(payload: ChatRequest):
+async def chat_endpoint(
+    payload: ChatRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     """
-    Chat endpoint - now powered by Copilot Studio
+    Chat endpoint - now powered by Copilot Studio.
+    Requires valid session JWT in Authorization header.
     """
     try:
-        logger.info(f"Received message: {payload.message}")
+        user_id = current_user.get("sub")
+        logger.info(f"Received message from user {user_id}")
         
         # Get Copilot service
         copilot_service = get_copilot_service()
         
-        # Send message to Copilot Studio (empty message gets greeting)
-        response_data = await copilot_service.send_message(payload.message)
+        # Send message to Copilot Studio using per-user conversation
+        response_data = await copilot_service.send_message(user_id, payload.message)
         
         # Build agent activity if there are attachments
         agent_activity = None
         if response_data.get("has_attachments"):
             agent_activity = {
-                "id": f"activity-{datetime.datetime.utcnow().timestamp()}",
+                "id": f"activity-{datetime.datetime.now(datetime.timezone.utc).timestamp()}",
                 "type": "message",
                 "text": response_data["reply"],
                 "attachments": response_data["attachments"]
@@ -397,13 +438,16 @@ async def chat_endpoint(payload: ChatRequest):
 
 
 @app.get("/copilot/status")
-async def copilot_status():
-    """Check Copilot Studio connection status"""
+async def copilot_status(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Check Copilot Studio connection status. Requires authentication."""
     try:
+        user_id = current_user.get("sub")
         copilot_service = get_copilot_service()
+        conversation_id = copilot_service.get_conversation_id(user_id)
         return {
             "connected": copilot_service._is_initialized,
-            "conversation_id": copilot_service._conversation_id
+            "conversation_id": conversation_id,
+            "user_id": user_id
         }
     except Exception as e:
         return {"connected": False, "error": str(e)}

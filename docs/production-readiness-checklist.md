@@ -134,6 +134,10 @@ Use this checklist to ensure your deployment meets production-grade security, pe
   - [ ] Scaling policies tested
   - [ ] Resource limits defined
   - [ ] Cost optimization reviewed
+  - [ ] **Per-user conversation storage migrated to shared storage (Redis)**
+    - [ ] Current implementation uses in-process memory only
+    - [ ] For multi-instance deployments, migrate conversation mapping to Redis
+    - [ ] Conversation isolation verified across instances
 
 ## Reliability
 
