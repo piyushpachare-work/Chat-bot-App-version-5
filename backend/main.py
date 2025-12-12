@@ -3,11 +3,15 @@ import datetime
 import json
 import logging
 import os
+import uuid
+from contextvars import ContextVar
 from pathlib import Path
 
 import jwt
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 
@@ -15,12 +19,44 @@ from pydantic import BaseModel, Field
 from copilot_service import get_copilot_service
 from auth_service import auth_router, auth_service
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
+# Request id context for structured logging
+request_id_ctx_var: ContextVar[str | None] = ContextVar("request_id", default=None)
+
+
+class RequestIdFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = request_id_ctx_var.get()
+        return True
+
+
+# Setup logging with request id support
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(request_id)s] %(name)s: %(message)s",
+)
+logging.getLogger().addFilter(RequestIdFilter())
 logger = logging.getLogger(__name__)
 
 
 app = FastAPI()
+
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        incoming_id = request.headers.get("x-request-id")
+        request_id = incoming_id.strip() if incoming_id else str(uuid.uuid4())
+        token = request_id_ctx_var.set(request_id)
+
+        try:
+            response = await call_next(request)
+        finally:
+            request_id_ctx_var.reset(token)
+
+        response.headers["X-Request-Id"] = request_id
+        return response
+
+# Request id propagation
+app.add_middleware(RequestIDMiddleware)
 
 # CORS configuration - environment-driven allowlist
 cors_origins_env = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000")

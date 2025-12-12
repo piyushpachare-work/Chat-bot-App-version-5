@@ -14,6 +14,7 @@ import { corsMiddleware, validateCorsConfig } from '../middleware/cors.js';
 import { apiRateLimiter, authRateLimiter, healthRateLimiter } from '../middleware/rate-limit.js';
 import { securityHeadersMiddleware, requireHttpsMiddleware } from '../middleware/security.js';
 import { verifySession } from '../middleware/session-verify.js';
+import { requestIdMiddleware } from '../middleware/request-id.js';
 
 const logger = createLogger();
 
@@ -46,6 +47,9 @@ export async function createApp(chatbotService: ChatbotService): Promise<Express
   // CORS middleware (strict allowlist)
   app.use(corsMiddleware);
 
+  // Request id propagation
+  app.use(requestIdMiddleware);
+
   // Body parsing middleware
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -57,6 +61,7 @@ export async function createApp(chatbotService: ChatbotService): Promise<Express
       method: req.method,
       path: req.path,
       ip: req.ip,
+      requestId: req.requestId,
     });
     next();
   });
@@ -111,10 +116,11 @@ export async function createApp(chatbotService: ChatbotService): Promise<Express
   });
 
   // Error handling middleware
-  app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
     logger.error('Unhandled error', {
       error: err.message,
       stack: process.env.NODE_ENV === 'development' ? err.stack : '[REDACTED]',
+      requestId: req.requestId,
     });
 
     res.status(500).json({

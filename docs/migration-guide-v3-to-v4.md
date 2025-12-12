@@ -4,6 +4,11 @@
 
 This guide helps you migrate from Version 3 to Version 4 of the Chatbot Application. Version 4 introduces significant security enhancements, Azure Key Vault integration, improved authentication, and production-grade features.
 
+### Quick breaking changes in this release
+- CI now runs Node, Python, and mobile tests on `integration/v4-master` pushes and PRs into `main`/`release/*`.
+- Request correlation is enforced via `X-Request-Id` on both Express and FastAPI; make sure edge proxies forward or generate this header.
+- Environment templates (`.env.example`) now call out Copilot Studio agent settings and strict session signing requirements.
+
 ## Breaking Changes
 
 ### 1. Configuration Changes

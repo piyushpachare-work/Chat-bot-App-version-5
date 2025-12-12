@@ -5,7 +5,6 @@
 - Azure subscription with appropriate permissions
 - Azure CLI installed and configured
 - Node.js 20+ and npm installed
-- Docker (optional, for containerized deployment)
 - GitHub Actions secrets configured (for CI/CD)
 
 ## Pre-Deployment Checklist
@@ -17,7 +16,8 @@
 - [ ] Rate limiting configured appropriately
 - [ ] SSL/TLS certificates obtained
 - [ ] Production database configured (if applicable)
-- [ ] Monitoring and logging configured
+- [ ] Monitoring and logging configured (ensure reverse proxies preserve `X-Request-Id`)
+- [ ] Environment values aligned with the provided `.env.example` templates
 
 ## Azure Deployment
 
@@ -142,7 +142,7 @@ az webapp deploy \
    - `AZURE_SUBSCRIPTION_ID`
    - `AZURE_RESOURCE_GROUP`
 
-2. Push to main branch - deployment will trigger automatically
+2. Push to `integration/v4-master` or open a PR into `main`/`release/*` - CI will run unit tests for Node, Python, and mobile packages.
 
 ### 7. Verify Deployment
 
