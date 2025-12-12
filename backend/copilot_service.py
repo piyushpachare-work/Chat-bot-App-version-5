@@ -1,6 +1,6 @@
 import os
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 from msal import PublicClientApplication
 from microsoft_agents.activity import ActivityTypes
@@ -14,13 +14,35 @@ TOKEN_CACHE = LocalTokenCache("./.local_token_cache.json")
 
 
 class CopilotService:
+    """
+    Copilot Studio service with per-user conversation isolation.
+    
+    IMPORTANT LIMITATIONS:
+    - Conversation mapping is stored in-process memory only (no Redis/external persistence).
+    - This means conversation state is lost on server restart.
+    - For multi-instance deployments, each instance maintains separate conversation state.
+    - To scale horizontally, migrate conversation mapping to shared storage (Redis, etc.).
+    
+    INITIALIZATION:
+    - Service is lazy-initialized (only when first message is sent).
+    - No network calls or token acquisition on startup/import.
+    - Token acquisition uses silent flow only (never interactive).
+    """
     def __init__(self):
         self._client = None
-        self._conversation_id = None
+        # Per-user conversation mapping: user_id -> conversation_id
+        # IN-MEMORY ONLY - lost on restart, not shared across instances
+        self._conversations: Dict[str, str] = {}
         self._is_initialized = False
 
     def _acquire_token(self, app_client_id: str, tenant_id: str) -> str:
-        """Acquire token from Azure AD"""
+        """
+        Acquire token from Azure AD using silent acquisition only.
+        
+        NOTE: This backend service NEVER triggers interactive MSAL flows.
+        If silent token acquisition fails, an error is raised instead of
+        attempting interactive login.
+        """
         pca = PublicClientApplication(
             client_id=app_client_id,
             authority=f"https://login.microsoftonline.com/{tenant_id}",
@@ -43,13 +65,21 @@ class CopilotService:
                 token = response.get("access_token")
                 
                 if not token:
-                    logger.warning("Silent acquisition failed, trying interactive...")
-                    response = pca.acquire_token_interactive(**token_request)
-                    token = response.get("access_token")
+                    error_msg = (
+                        "Silent token acquisition failed. Backend services must not "
+                        "use interactive authentication flows. Ensure a valid token "
+                        "is cached or use client credentials flow instead."
+                    )
+                    logger.error(error_msg)
+                    raise Exception(error_msg)
             else:
-                logger.info("No cached accounts, using interactive login...")
-                response = pca.acquire_token_interactive(**token_request)
-                token = response.get("access_token")
+                error_msg = (
+                    "No cached accounts found. Backend services must not use "
+                    "interactive authentication flows. Pre-authenticate or use "
+                    "client credentials flow instead."
+                )
+                logger.error(error_msg)
+                raise Exception(error_msg)
                 
         except Exception as e:
             logger.error(f"Error acquiring token: {e}")
@@ -84,18 +114,22 @@ class CopilotService:
         
         self._is_initialized = True
 
-    async def _start_conversation(self):
-        """Start conversation and get conversation ID and greeting message"""
-        logger.info("Starting conversation with Copilot Studio...")
+    async def _start_conversation(self) -> tuple[str, Optional[str]]:
+        """
+        Start a new conversation and get conversation ID and greeting message.
+        Returns: (conversation_id, greeting_message)
+        """
+        logger.info("Starting new conversation with Copilot Studio...")
         activities = self._client.start_conversation(True)
         
+        conversation_id = None
         greeting_message = None
         
         # Get conversation ID and greeting from activities
         async for activity in activities:
             if activity and hasattr(activity, 'conversation') and activity.conversation:
-                self._conversation_id = activity.conversation.id
-                logger.info(f"Conversation started: {self._conversation_id}")
+                conversation_id = activity.conversation.id
+                logger.info(f"Conversation started: {conversation_id}")
                 
                 # Capture greeting message if it exists
                 if hasattr(activity, 'text') and activity.text:
@@ -104,34 +138,65 @@ class CopilotService:
             else:
                 logger.warning(f"Received null/invalid activity: {activity}")
         
-        if not self._conversation_id:
+        if not conversation_id:
             raise ValueError("Failed to get conversation ID from Copilot Studio")
         
-        return greeting_message
+        return conversation_id, greeting_message
 
-    async def send_message(self, message: str) -> Dict[str, Any]:
-        """Send message to Copilot Studio and get response"""
+    def get_or_create_conversation(self, user_id: str) -> Optional[str]:
+        """
+        Get existing conversation ID for user, or None if new conversation needed.
+        
+        NOTE: This method does NOT initialize the client or create conversations.
+        Client initialization and conversation creation happen lazily in send_message()
+        to avoid any network calls or token acquisition on startup.
+        """
+        return self._conversations.get(user_id)
+
+    def get_conversation_id(self, user_id: str) -> Optional[str]:
+        """Get conversation ID for user, or None if not exists."""
+        return self._conversations.get(user_id)
+
+    async def send_message(self, user_id: str, message: str) -> Dict[str, Any]:
+        """
+        Send message to Copilot Studio using per-user conversation.
+        
+        Args:
+            user_id: User identifier from session JWT
+            message: Message text to send
+        
+        Returns:
+            Response dict with reply, attachments, etc.
+        """
         try:
             # Initialize client if needed
-            greeting_message = None
             if not self._is_initialized:
                 self._initialize_client()
-                greeting_message = await self._start_conversation()
+            
+            # Get or create conversation for this user
+            conversation_id = self._conversations.get(user_id)
+            greeting_message = None
+            
+            if not conversation_id:
+                # Create new conversation
+                conversation_id, greeting_message = await self._start_conversation()
+                self._conversations[user_id] = conversation_id
+                logger.info(f"Created conversation {conversation_id} for user {user_id}")
             
             # If this is a request for intro (empty message), return greeting
             if not message.strip() and greeting_message:
                 return {
                     "reply": greeting_message,
                     "all_responses": [greeting_message],
-                    "conversation_id": self._conversation_id,
+                    "conversation_id": conversation_id,
                     "has_attachments": False,
                     "attachments": []
                 }
 
-            logger.info(f"Sending message: {message}")
+            logger.info(f"Sending message from user {user_id} to conversation {conversation_id}")
             
             # Send message to Copilot Studio
-            replies = self._client.ask_question(message, self._conversation_id)
+            replies = self._client.ask_question(message, conversation_id)
             
             responses = []
             text_response = ""
@@ -176,7 +241,15 @@ _copilot_service = None
 
 
 def get_copilot_service() -> CopilotService:
-    """Get or create Copilot service instance"""
+    """
+    Get or create Copilot service instance (lazy initialization).
+    
+    NOTE: This function does NOT initialize the client or make any network calls.
+    The service instance is created, but client initialization and token acquisition
+    only happen when send_message() is called for the first time.
+    
+    This ensures the backend never triggers MSAL flows or network calls on startup.
+    """
     global _copilot_service
     if _copilot_service is None:
         _copilot_service = CopilotService()
