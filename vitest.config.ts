@@ -1,9 +1,12 @@
-import { defineConfig } from 'vitest/config';
+﻿import { defineConfig } from 'vitest/config';
+import { resolve } from 'path';
 
 export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    setupFiles: ['./src/test/setupTests.ts'],
+    testTimeout: 10000,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
@@ -14,5 +17,11 @@ export default defineConfig({
         '**/*.config.ts'
       ]
     }
-  }
+  },
+  resolve: {
+    alias: {
+      '@': resolve(__dirname, './'),
+      '@/src': resolve(__dirname, './src'),
+    },
+  },
 });

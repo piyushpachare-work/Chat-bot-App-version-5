@@ -97,17 +97,41 @@ class CopilotService:
 
         logger.info("Initializing Copilot Studio client...")
         
+        # Get required environment variables with helpful error messages
+        environment_id = os.environ.get("COPILOTSTUDIOAGENT__ENVIRONMENTID")
+        agent_identifier = os.environ.get("COPILOTSTUDIOAGENT__SCHEMANAME")
+        app_client_id = os.environ.get("COPILOTSTUDIOAGENT__AGENTAPPID")
+        tenant_id = os.environ.get("COPILOTSTUDIOAGENT__TENANTID")
+        
+        missing_vars = []
+        if not environment_id:
+            missing_vars.append("COPILOTSTUDIOAGENT__ENVIRONMENTID")
+        if not agent_identifier:
+            missing_vars.append("COPILOTSTUDIOAGENT__SCHEMANAME")
+        if not app_client_id:
+            missing_vars.append("COPILOTSTUDIOAGENT__AGENTAPPID")
+        if not tenant_id:
+            missing_vars.append("COPILOTSTUDIOAGENT__TENANTID")
+        
+        if missing_vars:
+            error_msg = (
+                f"Missing required Copilot Studio environment variables: {', '.join(missing_vars)}. "
+                "Please set these variables in your environment or .env file."
+            )
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
         settings = ConnectionSettings(
-            environment_id=os.environ.get("COPILOTSTUDIOAGENT__ENVIRONMENTID"),
-            agent_identifier=os.environ.get("COPILOTSTUDIOAGENT__SCHEMANAME"),
+            environment_id=environment_id,
+            agent_identifier=agent_identifier,
             cloud=PowerPlatformCloud.PROD,  
             copilot_agent_type=AgentType.PUBLISHED,  
             custom_power_platform_cloud=None  
         )
         
         token = self._acquire_token(
-            app_client_id=os.environ.get("COPILOTSTUDIOAGENT__AGENTAPPID"),
-            tenant_id=os.environ.get("COPILOTSTUDIOAGENT__TENANTID"),
+            app_client_id=app_client_id,
+            tenant_id=tenant_id,
         )
         
         self._client = CopilotClient(settings, token)

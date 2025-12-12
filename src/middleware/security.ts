@@ -12,7 +12,7 @@ const config = getAppConfigSync();
  * Sets security headers on all responses
  */
 export function securityHeadersMiddleware(
-  req: Request,
+  _req: Request,
   res: Response,
   next: NextFunction
 ): void {

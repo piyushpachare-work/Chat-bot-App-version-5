@@ -5,11 +5,12 @@
 
 import { EntraIdAuthService } from '../auth/entra-id-auth.js';
 import { Microsoft365AgentService } from '../integrations/microsoft-365-agent.js';
-import { getAppConfig } from '../config/app-config.js';
+import { getAppConfigSync } from '../config/app-config.js';
 import { createLogger } from '../utils/logger.js';
 
 const logger = createLogger();
-const config = getAppConfig();
+// Use sync config for module-level initialization
+const config = getAppConfigSync();
 
 /**
  * Chat message interface
@@ -55,8 +56,9 @@ export class ChatbotService {
   async initializeAuth(): Promise<{ url: string; state: string }> {
     try {
       const state = this.generateSessionId();
+      const scope = config.azure.scope || 'https://graph.microsoft.com/.default';
       const { url } = await this.authService.getAuthorizationUrl(
-        [config.azure.scope],
+        [scope],
         state
       );
 

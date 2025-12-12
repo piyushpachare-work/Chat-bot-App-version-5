@@ -84,8 +84,9 @@ async function getSecretValue(keyName: string, envVarName: string): Promise<stri
 
 /**
  * Validates that all required environment variables are present
+ * Returns array of missing variables instead of throwing
  */
-function validateConfig(): void {
+function validateConfig(): string[] {
   const requiredVars = [
     'AZURE_CLIENT_ID',
     'AZURE_TENANT_ID',
@@ -94,20 +95,16 @@ function validateConfig(): void {
 
   // Client secret can come from Key Vault or environment
   const hasClientSecret = process.env.AZURE_CLIENT_SECRET || process.env.AZURE_KEY_VAULT_URL;
-  if (!hasClientSecret) {
-    requiredVars.push('AZURE_CLIENT_SECRET or AZURE_KEY_VAULT_URL');
-  }
-
+  
   const missing = requiredVars.filter((varName) => {
-    if (varName.includes('or')) return false; // Already checked
     return !process.env[varName];
   });
 
-  if (missing.length > 0) {
-    throw new Error(
-      `Missing required environment variables: ${missing.join(', ')}`
-    );
+  if (!hasClientSecret) {
+    missing.push('AZURE_CLIENT_SECRET or AZURE_KEY_VAULT_URL');
   }
+
+  return missing;
 }
 
 /**
@@ -115,7 +112,13 @@ function validateConfig(): void {
  * @returns Application configuration object
  */
 export async function getAppConfig(): Promise<AppConfig> {
-  validateConfig();
+  const missing = validateConfig();
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required environment variables: ${missing.join(', ')}. ` +
+      `Please set these variables in your .env file or environment.`
+    );
+  }
 
   // Initialize Key Vault if URL is provided
   if (!keyVaultClient && process.env.AZURE_KEY_VAULT_URL) {
@@ -129,6 +132,12 @@ export async function getAppConfig(): Promise<AppConfig> {
   } catch {
     // Fallback for development
     clientSecret = process.env.AZURE_CLIENT_SECRET || '';
+    if (!clientSecret) {
+      throw new Error(
+        'AZURE_CLIENT_SECRET is required when AZURE_KEY_VAULT_URL is not configured. ' +
+        'Please set AZURE_CLIENT_SECRET in your environment variables.'
+      );
+    }
   }
 
   // Parse CORS allowed origins
@@ -169,7 +178,7 @@ export async function getAppConfig(): Promise<AppConfig> {
       maxRequests: rateLimitMaxRequests,
     },
     session: {
-      signingKey: process.env.SESSION_SIGNING_KEY!,
+      signingKey: process.env.SESSION_SIGNING_KEY || 'default-key-change-in-production',
     },
   };
 }
@@ -177,9 +186,27 @@ export async function getAppConfig(): Promise<AppConfig> {
 /**
  * Synchronous configuration getter (for backwards compatibility)
  * Note: This will not use Key Vault secrets
+ * Validates required variables but allows clientSecret to be optional for sync version
  */
 export function getAppConfigSync(): Omit<AppConfig, 'azure'> & { azure: Omit<AppConfig['azure'], 'clientSecret'> & { clientSecret?: string }; session: AppConfig['session'] } {
-  validateConfig();
+  const missing = validateConfig();
+  // For sync version, only validate non-secret variables
+  const criticalMissing = missing.filter(v => 
+    v !== 'AZURE_CLIENT_SECRET or AZURE_KEY_VAULT_URL' && 
+    v !== 'SESSION_SIGNING_KEY'
+  );
+  
+  if (criticalMissing.length > 0) {
+    throw new Error(
+      `Missing required environment variables: ${criticalMissing.join(', ')}. ` +
+      `Please set these variables in your .env file or environment.`
+    );
+  }
+  
+  // Warn if SESSION_SIGNING_KEY is missing but don't fail
+  if (!process.env.SESSION_SIGNING_KEY) {
+    console.warn('⚠️  WARNING: SESSION_SIGNING_KEY is not set. Session tokens may not work correctly.');
+  }
 
   const allowedOrigins = process.env.CORS_ALLOWED_ORIGINS
     ? process.env.CORS_ALLOWED_ORIGINS.split(',').map((origin) => origin.trim())
@@ -217,7 +244,7 @@ export function getAppConfigSync(): Omit<AppConfig, 'azure'> & { azure: Omit<App
       maxRequests: rateLimitMaxRequests,
     },
     session: {
-      signingKey: process.env.SESSION_SIGNING_KEY!,
+      signingKey: process.env.SESSION_SIGNING_KEY || 'default-key-change-in-production',
     },
   };
 }

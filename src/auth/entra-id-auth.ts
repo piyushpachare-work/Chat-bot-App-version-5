@@ -34,7 +34,7 @@ export class EntraIdAuthService {
       },
       system: {
         loggerOptions: {
-          loggerCallback: (level: number, message: string): void => {
+          loggerCallback: (_level: number, message: string): void => {
             // Sanitize MSAL logs to ensure no secrets are logged
             logger.debug(`[MSAL] ${message}`);
           },

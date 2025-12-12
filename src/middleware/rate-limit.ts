@@ -17,16 +17,18 @@ const config = getAppConfigSync();
 export const createRateLimiter = (options?: {
   windowMs?: number;
   maxRequests?: number;
-  message?: string;
+  message?: string | { error: string; message: string };
   skipSuccessfulRequests?: boolean;
 }) => {
+  const defaultMessage = {
+    error: 'Too many requests',
+    message: 'Rate limit exceeded. Please try again later.',
+  };
+  
   const limiter = rateLimit({
     windowMs: options?.windowMs || config.rateLimit.windowMs,
     max: options?.maxRequests || config.rateLimit.maxRequests,
-    message: options?.message || {
-      error: 'Too many requests',
-      message: 'Rate limit exceeded. Please try again later.',
-    },
+    message: options?.message || defaultMessage,
     standardHeaders: true, // Return rate limit info in `RateLimit-*` headers
     legacyHeaders: false, // Disable `X-RateLimit-*` headers
     skipSuccessfulRequests: options?.skipSuccessfulRequests || false,

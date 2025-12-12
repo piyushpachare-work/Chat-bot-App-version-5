@@ -23,14 +23,25 @@ logger = logging.getLogger(__name__)
 
 
 def _env(name: str, default: Optional[str] = None) -> str:
+    """
+    Get required environment variable with optional default.
+    Raises ValueError if not found and no default provided.
+    """
     value = os.getenv(name, default)
     if value is None:
-        raise ValueError(f"Missing required environment variable: {name}")
+        raise ValueError(
+            f"Missing required environment variable: {name}. "
+            f"Please set {name} in your environment variables or .env file."
+        )
     return value
 
 
-def _optional_env(name: str) -> Optional[str]:
-    return os.getenv(name)
+def _optional_env(name: str, default: Optional[str] = None) -> Optional[str]:
+    """
+    Get optional environment variable with optional default.
+    Returns None if not found and no default provided.
+    """
+    return os.getenv(name, default)
 
 
 # ---------------------------------------------------------------------------
@@ -42,6 +53,8 @@ class SecureTokenStore:
     """
     Stores refresh tokens and ID token metadata securely.
     Prefers Azure Key Vault; falls back to encrypted SQLite using Fernet.
+    If neither Key Vault nor an encryption key is configured, uses an
+    in-memory store suitable for local development only.
     """
 
     def __init__(
@@ -50,21 +63,22 @@ class SecureTokenStore:
         encryption_key: Optional[str],
         sqlite_path: str = "./.secure_tokens.db",
     ):
+        self._mode: str = "unset"
         self._key_vault_uri = key_vault_uri
         self._encryption_key = encryption_key
         self._sqlite_path = sqlite_path
         self._fernet: Optional[Fernet] = None
         self._kv_client: Optional[SecretClient] = None
+        self._memory_store: Dict[str, Dict[str, Any]] = {}
 
         if key_vault_uri:
             credential = DefaultAzureCredential(exclude_interactive_browser_credential=True)
             self._kv_client = SecretClient(vault_url=key_vault_uri, credential=credential)
             logger.info("SecureTokenStore configured to use Azure Key Vault.")
-        else:
-            if not encryption_key:
-                raise ValueError(
-                    "TOKEN_STORE_ENCRYPTION_KEY is required when Key Vault is not configured."
-                )
+            self._mode = "key_vault"
+            return
+
+        if encryption_key:
             try:
                 self._fernet = Fernet(encryption_key.encode("utf-8"))
             except ValueError as exc:
@@ -72,7 +86,17 @@ class SecureTokenStore:
                     "TOKEN_STORE_ENCRYPTION_KEY must be a 32-byte urlsafe base64 string."
                 ) from exc
             self._init_sqlite()
+            self._mode = "sqlite"
             logger.info("SecureTokenStore using encrypted SQLite fallback.")
+            return
+
+        # Development-friendly fallback: in-memory, non-persistent store.
+        self._mode = "memory"
+        logger.warning(
+            "TOKEN_STORE_ENCRYPTION_KEY not set and KEY_VAULT_URI missing. "
+            "Using in-memory token store (tokens are not persisted and will reset on restart). "
+            "Configure Key Vault or TOKEN_STORE_ENCRYPTION_KEY for production."
+        )
 
     def _init_sqlite(self) -> None:
         conn = sqlite3.connect(self._sqlite_path)
@@ -101,10 +125,17 @@ class SecureTokenStore:
         return self._fernet.decrypt(blob).decode("utf-8")
 
     def store_tokens(self, user_id: str, refresh_token: str, id_token_meta: Dict[str, Any]) -> None:
-        if self._kv_client:
+        if self._mode == "key_vault" and self._kv_client:
             # Store in Key Vault as individual secrets to avoid large payloads.
             self._kv_client.set_secret(f"refresh-token-{user_id}", refresh_token)
             self._kv_client.set_secret(f"id-token-meta-{user_id}", json.dumps(id_token_meta))
+            return
+
+        if self._mode == "memory":
+            self._memory_store[user_id] = {
+                "refresh_token": refresh_token,
+                "id_token_meta": id_token_meta,
+            }
             return
 
         encrypted_refresh = self._encrypt(refresh_token)
@@ -127,7 +158,7 @@ class SecureTokenStore:
             conn.close()
 
     def get_tokens(self, user_id: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
-        if self._kv_client:
+        if self._mode == "key_vault" and self._kv_client:
             try:
                 refresh = self._kv_client.get_secret(f"refresh-token-{user_id}").value
             except Exception:
@@ -138,6 +169,12 @@ class SecureTokenStore:
             except Exception:
                 meta = None
             return refresh, meta
+
+        if self._mode == "memory":
+            entry = self._memory_store.get(user_id)
+            if not entry:
+                return None, None
+            return entry.get("refresh_token"), entry.get("id_token_meta")
 
         conn = sqlite3.connect(self._sqlite_path)
         try:
@@ -157,7 +194,7 @@ class SecureTokenStore:
         return refresh, meta
 
     def delete_tokens(self, user_id: str) -> None:
-        if self._kv_client:
+        if self._mode == "key_vault" and self._kv_client:
             try:
                 self._kv_client.begin_delete_secret(f"refresh-token-{user_id}")
             except Exception:
@@ -166,6 +203,10 @@ class SecureTokenStore:
                 self._kv_client.begin_delete_secret(f"id-token-meta-{user_id}")
             except Exception:
                 pass
+            return
+
+        if self._mode == "memory":
+            self._memory_store.pop(user_id, None)
             return
 
         conn = sqlite3.connect(self._sqlite_path)
@@ -183,26 +224,34 @@ class SecureTokenStore:
 
 class AuthService:
     def __init__(self):
-        tenant_id = _env("ENTRA_TENANT_ID")
-        self.client_id = _env("ENTRA_CLIENT_ID")
-        self.client_secret = _env("ENTRA_CLIENT_SECRET")
-        self.redirect_uri = _env("OIDC_REDIRECT_URI")
-        self.scopes = json.loads(os.getenv("OIDC_SCOPES", '["openid", "profile", "offline_access"]'))
-        self.authority = f"https://login.microsoftonline.com/{tenant_id}"
-        self.jwks_uri = f"{self.authority}/discovery/v2.0/keys"
+        try:
+            tenant_id = _env("ENTRA_TENANT_ID")
+            self.client_id = _env("ENTRA_CLIENT_ID")
+            self.client_secret = _env("ENTRA_CLIENT_SECRET")
+            self.redirect_uri = _env("OIDC_REDIRECT_URI", "http://localhost:3000/auth/callback")
+            self.scopes = json.loads(os.getenv("OIDC_SCOPES", '["openid", "profile", "offline_access"]'))
+            self.authority = f"https://login.microsoftonline.com/{tenant_id}"
+            self.jwks_uri = f"{self.authority}/discovery/v2.0/keys"
 
-        key_vault_uri = _optional_env("KEY_VAULT_URI")
-        encryption_key = _optional_env("TOKEN_STORE_ENCRYPTION_KEY")
-        sqlite_path = os.getenv("TOKEN_STORE_DB_PATH", "./.secure_tokens.db")
+            key_vault_uri = _optional_env("KEY_VAULT_URI")
+            encryption_key = _optional_env("TOKEN_STORE_ENCRYPTION_KEY")
+            sqlite_path = os.getenv("TOKEN_STORE_DB_PATH", "./.secure_tokens.db")
 
-        self.token_store = SecureTokenStore(key_vault_uri, encryption_key, sqlite_path)
-        self._session_ttl_minutes = int(os.getenv("SESSION_JWT_TTL_MINUTES", "15"))
-        self._jwk_client = PyJWKClient(self.jwks_uri)
-        self._confidential_client = ConfidentialClientApplication(
-            client_id=self.client_id,
-            client_credential=self.client_secret,
-            authority=self.authority,
-        )
+            self.token_store = SecureTokenStore(key_vault_uri, encryption_key, sqlite_path)
+            self._session_ttl_minutes = int(os.getenv("SESSION_JWT_TTL_MINUTES", "15"))
+            self._jwk_client = PyJWKClient(self.jwks_uri)
+            self._confidential_client = ConfidentialClientApplication(
+                client_id=self.client_id,
+                client_credential=self.client_secret,
+                authority=self.authority,
+            )
+        except ValueError as e:
+            logger.error(f"Configuration error: {e}")
+            raise ValueError(
+                f"Failed to initialize AuthService: {e}. "
+                "Please ensure all required environment variables are set. "
+                "Required: ENTRA_TENANT_ID, ENTRA_CLIENT_ID, ENTRA_CLIENT_SECRET"
+            ) from e
 
     # ------------------------- Token exchange ------------------------------ #
     def build_auth_url(self, state: Optional[str] = None) -> str:

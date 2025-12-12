@@ -6,7 +6,7 @@
 
 import { SecretClient } from '@azure/keyvault-secrets';
 import { DefaultAzureCredential, ManagedIdentityCredential, ClientSecretCredential } from '@azure/identity';
-import { getAppConfig } from '../config/app-config.js';
+import { getAppConfigSync } from '../config/app-config.js';
 import { createLogger } from '../utils/logger.js';
 
 const logger = createLogger();
@@ -18,12 +18,12 @@ const logger = createLogger();
 export class KeyVaultClient {
   private readonly secretClient: SecretClient;
   private readonly vaultUrl: string;
-  private readonly config;
   private cache: Map<string, { value: string; expiresAt: number }> = new Map();
   private readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
   constructor(vaultUrl?: string) {
-    this.config = getAppConfig();
+    // Use sync config for constructor (secrets retrieved async when needed)
+    const config = getAppConfigSync();
     this.vaultUrl = vaultUrl || process.env.AZURE_KEY_VAULT_URL || '';
 
     if (!this.vaultUrl) {
@@ -32,16 +32,20 @@ export class KeyVaultClient {
 
     // Use Managed Identity in production, Client Secret in development
     let credential;
-    if (process.env.AZURE_CLIENT_ID && process.env.AZURE_CLIENT_SECRET) {
+    const clientId = process.env.AZURE_CLIENT_ID || config.azure.clientId;
+    const tenantId = process.env.AZURE_TENANT_ID || config.azure.tenantId;
+    const clientSecret = process.env.AZURE_CLIENT_SECRET || config.azure.clientSecret;
+
+    if (clientId && clientSecret && tenantId) {
       credential = new ClientSecretCredential(
-        this.config.azure.tenantId,
-        this.config.azure.clientId,
-        this.config.azure.clientSecret
+        tenantId,
+        clientId,
+        clientSecret
       );
     } else {
       // Use Managed Identity or DefaultAzureCredential
-      credential = process.env.AZURE_CLIENT_ID
-        ? new ManagedIdentityCredential({ clientId: process.env.AZURE_CLIENT_ID })
+      credential = clientId
+        ? new ManagedIdentityCredential({ clientId })
         : new DefaultAzureCredential();
     }
 

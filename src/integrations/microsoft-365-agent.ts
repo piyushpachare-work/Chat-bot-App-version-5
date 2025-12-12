@@ -4,7 +4,6 @@
  */
 
 import { Client } from '@microsoft/microsoft-graph-client';
-import { getAppConfigSync } from '../config/app-config.js';
 import { createLogger } from '../utils/logger.js';
 import type { AuthenticationResult } from '@azure/msal-node';
 import 'isomorphic-fetch';
@@ -25,11 +24,9 @@ interface AuthProvider {
 export class Microsoft365AgentService {
   private graphClient: Client | null = null;
   private accessToken: string | null = null;
-  private readonly config;
 
   constructor() {
-    // Use sync config for constructor
-    this.config = getAppConfigSync();
+    // Config is accessed via getAppConfigSync() when needed
   }
 
   /**

@@ -122,7 +122,7 @@ export function createAuthRoutes(chatbotService: ChatbotService): Router {
       // Clear state cookie
       res.clearCookie('auth_state');
 
-      const { sessionId, userId } = await chatbotService.completeAuthentication(
+      const { sessionId } = await chatbotService.completeAuthentication(
         code,
         state as string
       );
