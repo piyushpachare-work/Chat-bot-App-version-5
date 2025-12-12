@@ -176,6 +176,7 @@ AZURE_CLIENT_ID=<app-registration-client-id>
 AZURE_TENANT_ID=<azure-ad-tenant-id>
 AZURE_KEY_VAULT_URL=https://<vault-name>.vault.azure.net/
 AZURE_REDIRECT_URI=https://your-app.com/auth/callback
+SESSION_SIGNING_KEY=<secret-key-min-32-characters-for-hs256-jwt-signing>
 ```
 
 ### Key Vault Secrets
@@ -321,6 +322,10 @@ All authentication errors:
 - Use generic error messages in production
 - Log detailed errors server-side (sanitized)
 - Return appropriate HTTP status codes
+
+## Middleware-Side Authoritative Identity Processor
+
+The middleware serves as the authoritative identity processor for Microsoft Entra ID OIDC authentication. The `verifySession` middleware validates session JWTs on protected routes (e.g., `/chat`), ensuring that all requests are authenticated before processing. Session JWTs are issued with a 15-minute TTL (Time To Live) and are signed using HS256 with the `SESSION_SIGNING_KEY`. Refresh tokens are single-use tokens stored in a process-scoped in-memory map, mapping refresh tokens to user subjects. When a refresh token is used to obtain a new session JWT, the old refresh token is invalidated and a new one is issued, providing secure token rotation without requiring persistent storage.
 
 ## Compliance
 

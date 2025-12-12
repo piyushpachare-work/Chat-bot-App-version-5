@@ -13,6 +13,7 @@ import { createChatRoutes } from '../routes/chat-routes.js';
 import { corsMiddleware, validateCorsConfig } from '../middleware/cors.js';
 import { apiRateLimiter, authRateLimiter, healthRateLimiter } from '../middleware/rate-limit.js';
 import { securityHeadersMiddleware, requireHttpsMiddleware } from '../middleware/security.js';
+import { verifySession } from '../middleware/session-verify.js';
 
 const logger = createLogger();
 
@@ -85,7 +86,7 @@ export async function createApp(chatbotService: ChatbotService): Promise<Express
 
   // Routes with rate limiting
   app.use('/auth', authRateLimiter, createAuthRoutes(chatbotService));
-  app.use('/chat', apiRateLimiter, createChatRoutes(chatbotService));
+  app.use('/chat', apiRateLimiter, verifySession, createChatRoutes(chatbotService));
 
   // Root endpoint
   app.get('/', apiRateLimiter, (_req, res) => {

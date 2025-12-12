@@ -35,6 +35,9 @@ interface AppConfig {
     windowMs: number;
     maxRequests: number;
   };
+  session: {
+    signingKey: string;
+  };
 }
 
 let keyVaultClient: KeyVaultClient | null = null;
@@ -86,6 +89,7 @@ function validateConfig(): void {
   const requiredVars = [
     'AZURE_CLIENT_ID',
     'AZURE_TENANT_ID',
+    'SESSION_SIGNING_KEY',
   ];
 
   // Client secret can come from Key Vault or environment
@@ -164,6 +168,9 @@ export async function getAppConfig(): Promise<AppConfig> {
       windowMs: rateLimitWindowMs,
       maxRequests: rateLimitMaxRequests,
     },
+    session: {
+      signingKey: process.env.SESSION_SIGNING_KEY!,
+    },
   };
 }
 
@@ -171,7 +178,7 @@ export async function getAppConfig(): Promise<AppConfig> {
  * Synchronous configuration getter (for backwards compatibility)
  * Note: This will not use Key Vault secrets
  */
-export function getAppConfigSync(): Omit<AppConfig, 'azure'> & { azure: Omit<AppConfig['azure'], 'clientSecret'> & { clientSecret?: string } } {
+export function getAppConfigSync(): Omit<AppConfig, 'azure'> & { azure: Omit<AppConfig['azure'], 'clientSecret'> & { clientSecret?: string }; session: AppConfig['session'] } {
   validateConfig();
 
   const allowedOrigins = process.env.CORS_ALLOWED_ORIGINS
@@ -208,6 +215,9 @@ export function getAppConfigSync(): Omit<AppConfig, 'azure'> & { azure: Omit<App
     rateLimit: {
       windowMs: rateLimitWindowMs,
       maxRequests: rateLimitMaxRequests,
+    },
+    session: {
+      signingKey: process.env.SESSION_SIGNING_KEY!,
     },
   };
 }
