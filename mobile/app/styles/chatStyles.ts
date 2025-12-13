@@ -1,110 +1,111 @@
 import { StyleSheet } from "react-native";
+import { FluentColors, FluentSpacing, FluentBorderRadius, FluentTypography } from "@/constants/fluent-ui-tokens";
 
 export const chatStyles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f2f2f2" },
-  list: { padding: 16 },
+  container: { flex: 1, backgroundColor: FluentColors.background.secondary },
+  list: { padding: FluentSpacing.l },
 
   bubble: {
     maxWidth: "80%",
-    padding: 10,
-    borderRadius: 12,
-    marginBottom: 8,
+    padding: FluentSpacing.m,
+    borderRadius: FluentBorderRadius.large,
+    marginBottom: FluentSpacing.s,
   },
   userBubble: {
     alignSelf: "flex-end",
-    backgroundColor: "#d1e7ff",
+    backgroundColor: FluentColors.brand.primaryDisabled,
   },
   botBubble: {
     alignSelf: "flex-start",
-    backgroundColor: "#ffffff",
+    backgroundColor: FluentColors.background.default,
+    borderWidth: 1,
+    borderColor: FluentColors.border.default,
   },
 
   bubbleHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 2,
+    marginBottom: FluentSpacing.xxs,
   },
-  label: { fontSize: 10, color: "#444" },
-  msg: { fontSize: 14, color: "#111" },
+  label: { 
+    fontSize: FluentTypography.fontSize.small, 
+    color: FluentColors.text.secondary 
+  },
+  msg: { 
+    fontSize: FluentTypography.fontSize.medium, 
+    color: FluentColors.text.primary 
+  },
 
   inputRow: {
     flexDirection: "row",
-    paddingHorizontal: 8,
-    paddingTop: 8,
-    paddingBottom: 12,
+    paddingHorizontal: FluentSpacing.s,
+    paddingTop: FluentSpacing.s,
+    paddingBottom: FluentSpacing.m,
     borderTopWidth: 1,
-    borderColor: "#ddd",
-    backgroundColor: "#fff",
+    borderColor: FluentColors.border.default,
+    backgroundColor: FluentColors.background.default,
+    alignItems: "flex-end",
+    gap: FluentSpacing.s,
   },
   input: {
     flex: 1,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 8,
-    marginRight: 8,
     minHeight: 40,
     maxHeight: 120,
+    marginRight: FluentSpacing.s,
   },
 
   charCount: {
-    fontSize: 10,
     textAlign: "right",
-    marginTop: 2,
-    color: "#666",
+    marginTop: FluentSpacing.xxs,
   },
   charCountExceeded: {
-    color: "#dc2626",
-    fontWeight: "600",
+    // Handled by Text component color prop
   },
 
-  button: {
-    paddingHorizontal: 16,
-    justifyContent: "center",
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#007AFF",
+  sendButton: {
+    alignSelf: "flex-end",
   },
-  buttonDisabled: { opacity: 0.5 },
-  buttonText: { color: "#007AFF", fontWeight: "600" },
 
   // learning plan card
   learningContainer: {
-    marginTop: 8,
-    padding: 10,
-    borderRadius: 8,
-    backgroundColor: "#eef2ff",
+    marginTop: FluentSpacing.s,
+    padding: FluentSpacing.m,
+    borderRadius: FluentBorderRadius.large,
+    backgroundColor: FluentColors.semantic.infoBackground,
     borderWidth: 1,
-    borderColor: "#c7d2fe",
+    borderColor: FluentColors.brand.primaryDisabled,
   },
   learningTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#111827",
+    fontSize: FluentTypography.fontSize.medium,
+    fontWeight: FluentTypography.fontWeight.bold,
+    color: FluentColors.text.primary,
   },
   learningMeta: {
-    fontSize: 11,
-    color: "#4b5563",
-    marginBottom: 6,
+    fontSize: FluentTypography.fontSize.small,
+    color: FluentColors.text.secondary,
+    marginBottom: FluentSpacing.xs,
   },
   learningSectionTitle: {
-    marginTop: 6,
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#1f2937",
+    marginTop: FluentSpacing.xs,
+    fontSize: FluentTypography.fontSize.small,
+    fontWeight: FluentTypography.fontWeight.semibold,
+    color: FluentColors.text.primary,
   },
-  learningModule: { marginTop: 4 },
+  learningModule: { marginTop: FluentSpacing.xs },
   learningModuleTitle: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#111827",
+    fontSize: FluentTypography.fontSize.small,
+    fontWeight: FluentTypography.fontWeight.semibold,
+    color: FluentColors.text.primary,
   },
-  learningModuleDesc: { fontSize: 11, color: "#4b5563" },
+  learningModuleDesc: { 
+    fontSize: FluentTypography.fontSize.small, 
+    color: FluentColors.text.secondary 
+  },
   linkText: {
-    fontSize: 11,
-    color: "#2563eb",
+    fontSize: FluentTypography.fontSize.small,
+    color: FluentColors.brand.primary,
     textDecorationLine: "underline",
-    marginTop: 2,
+    marginTop: FluentSpacing.xxs,
   },
 
   // agent UI stress test
@@ -152,12 +153,12 @@ export const chatStyles = StyleSheet.create({
 
   // message group + timestamp above bubble
   messageGroup: {
-    marginBottom: 8,
+    marginBottom: FluentSpacing.s,
   },
   timeAbove: {
-    fontSize: 10,
-    color: "#777",
-    marginBottom: 2,
+    fontSize: FluentTypography.fontSize.small,
+    color: FluentColors.text.secondary,
+    marginBottom: FluentSpacing.xxs,
   },
   timeRight: {
     alignSelf: "flex-end",
@@ -168,49 +169,42 @@ export const chatStyles = StyleSheet.create({
 
   // "View" inline button
   inlineButton: {
-    marginTop: 8,
+    marginTop: FluentSpacing.s,
     alignSelf: "flex-start",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: "#2563eb",
   },
   inlineButtonText: {
-    fontSize: 11,
-    color: "#2563eb",
-    fontWeight: "600",
+    // Handled by Button component
   },
 
   // ===== Daily plan table styles =====
   tableContainer: {
-    marginTop: 8,
+    marginTop: FluentSpacing.s,
     borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 8,
+    borderColor: FluentColors.border.default,
+    borderRadius: FluentBorderRadius.large,
     overflow: "hidden",
   },
   tableHeaderRow: {
     flexDirection: "row",
-    backgroundColor: "#f3f4f6",
+    backgroundColor: FluentColors.background.tertiary,
   },
   tableRow: {
     flexDirection: "row",
     borderTopWidth: 1,
-    borderTopColor: "#e5e7eb",
+    borderTopColor: FluentColors.border.default,
   },
   tableHeaderCell: {
-    paddingHorizontal: 6,
-    paddingVertical: 6,
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#111827",
+    paddingHorizontal: FluentSpacing.xs,
+    paddingVertical: FluentSpacing.xs,
+    fontSize: FluentTypography.fontSize.small,
+    fontWeight: FluentTypography.fontWeight.bold,
+    color: FluentColors.text.primary,
   },
   tableCell: {
-    paddingHorizontal: 6,
-    paddingVertical: 6,
-    fontSize: 11,
-    color: "#374151",
+    paddingHorizontal: FluentSpacing.xs,
+    paddingVertical: FluentSpacing.xs,
+    fontSize: FluentTypography.fontSize.small,
+    color: FluentColors.text.secondary,
   },
   tableColDay: {
     flex: 1.4,
@@ -220,5 +214,24 @@ export const chatStyles = StyleSheet.create({
   },
   tableColActivity: {
     flex: 1.6,
+  },
+
+  // Sidebar toggle button
+  sidebarToggle: {
+    position: "absolute" as const,
+    top: 16,
+    left: 16,
+    zIndex: 10,
+    backgroundColor: "#ffffff",
+    borderRadius: 20,
+    width: 40,
+    height: 40,
+    justifyContent: "center" as const,
+    alignItems: "center" as const,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
 });

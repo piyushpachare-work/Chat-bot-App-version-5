@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 # Import Copilot service
 from copilot_service import get_copilot_service
 from auth_service import auth_router, auth_service
+from notes_service import get_notes_service
 
 # Request id context for structured logging
 request_id_ctx_var: ContextVar[str | None] = ContextVar("request_id", default=None)
@@ -487,3 +488,159 @@ async def copilot_status(current_user: Dict[str, Any] = Depends(get_current_user
         }
     except Exception as e:
         return {"connected": False, "error": str(e)}
+
+
+# -------------------------------------------------------------------
+# NOTES API ENDPOINTS
+# -------------------------------------------------------------------
+
+class SaveNoteRequest(BaseModel):
+    content: str
+    title: Optional[str] = None
+    tags: Optional[List[str]] = None
+    message_id: Optional[str] = None
+    conversation_id: Optional[str] = None
+
+
+class UpdateNoteRequest(BaseModel):
+    title: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+
+@app.post("/notes")
+async def save_note(
+    payload: SaveNoteRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Save a note from an AI response."""
+    try:
+        user_id = current_user.get("sub")
+        notes_service = get_notes_service()
+        
+        note = notes_service.save_note(
+            user_id=user_id,
+            content=payload.content,
+            title=payload.title,
+            tags=payload.tags,
+            message_id=payload.message_id,
+            conversation_id=payload.conversation_id
+        )
+        
+        return note
+    except Exception as e:
+        logger.error(f"Error saving note: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/notes")
+async def get_notes(
+    tag: Optional[str] = None,
+    search: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Get all notes for the current user with optional filtering."""
+    try:
+        user_id = current_user.get("sub")
+        notes_service = get_notes_service()
+        
+        notes = notes_service.get_notes(
+            user_id=user_id,
+            limit=limit,
+            offset=offset,
+            tag_filter=tag,
+            search_query=search
+        )
+        
+        return {"notes": notes, "count": len(notes)}
+    except Exception as e:
+        logger.error(f"Error getting notes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/notes/tags/all")
+async def get_all_tags(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Get all unique tags for the current user."""
+    try:
+        user_id = current_user.get("sub")
+        notes_service = get_notes_service()
+        
+        tags = notes_service.get_all_tags(user_id)
+        return {"tags": tags}
+    except Exception as e:
+        logger.error(f"Error getting tags: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/notes/{note_id}")
+async def get_note(
+    note_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Get a specific note by ID."""
+    try:
+        user_id = current_user.get("sub")
+        notes_service = get_notes_service()
+        
+        note = notes_service.get_note(note_id, user_id)
+        if not note:
+            raise HTTPException(status_code=404, detail="Note not found")
+        
+        return note
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting note: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/notes/{note_id}")
+async def update_note(
+    note_id: str,
+    payload: UpdateNoteRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Update a note's title and/or tags."""
+    try:
+        user_id = current_user.get("sub")
+        notes_service = get_notes_service()
+        
+        note = notes_service.update_note(
+            note_id=note_id,
+            user_id=user_id,
+            title=payload.title,
+            tags=payload.tags
+        )
+        
+        if not note:
+            raise HTTPException(status_code=404, detail="Note not found")
+        
+        return note
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating note: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/notes/{note_id}")
+async def delete_note(
+    note_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Delete a note."""
+    try:
+        user_id = current_user.get("sub")
+        notes_service = get_notes_service()
+        
+        deleted = notes_service.delete_note(note_id, user_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Note not found")
+        
+        return {"success": True, "id": note_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting note: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

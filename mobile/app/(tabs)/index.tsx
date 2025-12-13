@@ -6,11 +6,14 @@ import {
   Linking,
   Platform,
   SafeAreaView,
-  Text,
-  TextInput,
-  TouchableOpacity,
   View,
 } from "react-native";
+import { useRouter } from "expo-router";
+import { IconSymbol } from "@/components/ui/icon-symbol";
+import { Text } from "@/components/fluent-ui/Text";
+import { TextInput } from "@/components/fluent-ui/TextInput";
+import { Button } from "@/components/fluent-ui/Button";
+import { FluentColors, FluentSpacing } from "@/constants/fluent-ui-tokens";
 
 import { interactiveLogin, ensureValidSession, authenticatedFetch } from "@/src/auth/api";
 import {
@@ -23,6 +26,8 @@ import {
 import { getBackendBaseUrl } from "@/src/auth/config";
 import { chatStyles as styles } from "../styles/chatStyles";
 import { timeAgo } from "../utils/timeAgo";
+import { SavedNotesSidebar } from "../components/SavedNotesSidebar";
+import { SaveToNotesButton } from "../components/SaveToNotesButton";
 
 const MAX_MESSAGE_LENGTH = 1500;
 const CHAT_URL = `${getBackendBaseUrl()}/chat`;
@@ -76,15 +81,17 @@ type Message = {
 };
 
 export default function Page() {
+  const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [tick, setTick] = useState(0);
   const [hasLoadedIntro, setHasLoadedIntro] = useState(false);
-  const [authenticating, setAuthenticating] = useState(false);
   const [session, setSession] = useState<SessionTokens | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [sidebarVisible, setSidebarVisible] = useState(true); // Open by default
+  const [sidebarRefreshTrigger, setSidebarRefreshTrigger] = useState(0);
 
   // Re-render timeAgo() every 60 seconds
   useEffect(() => {
@@ -109,14 +116,18 @@ export default function Page() {
         if (validSession) {
           setSession(validSession);
           setAuthError(null);
+        } else {
+          // No valid session, redirect to login
+          router.replace('/login');
         }
       } catch (error) {
-        setAuthError("Sign-in required to start chatting.");
+        // On error, redirect to login
+        router.replace('/login');
       }
     };
 
     bootstrap();
-  }, [syncConversationId]);
+  }, [syncConversationId, router]);
 
   // Load intro message after authentication
   useEffect(() => {
@@ -161,18 +172,19 @@ export default function Page() {
         return valid;
       }
 
-      setAuthenticating(true);
-      const fresh = await interactiveLogin();
-      setSession(fresh);
-      setAuthError(null);
-      return fresh;
+      // No valid session, redirect to login screen
+      router.replace('/login');
+      throw new Error("No valid session");
     } catch (error) {
-      setAuthError("Sign-in was cancelled or failed.");
+      // If already redirecting, just throw
+      if (error instanceof Error && error.message === "No valid session") {
+        throw error;
+      }
+      // Otherwise redirect to login
+      router.replace('/login');
       throw error;
-    } finally {
-      setAuthenticating(false);
     }
-  }, []);
+  }, [router]);
 
   const handleUnauthorized = useCallback(async () => {
     setSession(null);
@@ -354,44 +366,42 @@ export default function Page() {
 
       return (
         <View style={styles.messageGroup}>
-          <Text style={[styles.timeAbove, styles.timeLeft]}>
+          <Text variant="caption" color="secondary" style={[styles.timeAbove, styles.timeLeft]}>
             {timeAgo(item.timestamp)}
           </Text>
 
           <View style={[styles.bubble, styles.botBubble]}>
             <View style={styles.bubbleHeader}>
-              <Text style={styles.label}>Bot</Text>
+              <Text variant="caption" color="secondary" style={styles.label}>Bot</Text>
             </View>
 
-            <Text style={styles.msg}>
+            <Text variant="body" style={styles.msg}>
               Here is your detailed daily learning plan:
             </Text>
 
             <View style={styles.tableContainer}>
               {/* table header */}
               <View style={styles.tableHeaderRow}>
-                <Text style={[styles.tableHeaderCell, styles.tableColDay]}>
+                <Text variant="caption" weight="bold" style={[styles.tableHeaderCell, styles.tableColDay]}>
                   Day
                 </Text>
-                <Text style={[styles.tableHeaderCell, styles.tableColFocus]}>
+                <Text variant="caption" weight="bold" style={[styles.tableHeaderCell, styles.tableColFocus]}>
                   Focus
                 </Text>
-                <Text
-                  style={[styles.tableHeaderCell, styles.tableColActivity]}
-                >
+                <Text variant="caption" weight="bold" style={[styles.tableHeaderCell, styles.tableColActivity]}>
                   Activity
                 </Text>
               </View>
 
               {rows.map((row) => (
                 <View key={row.key} style={styles.tableRow}>
-                  <Text style={[styles.tableCell, styles.tableColDay]}>
+                  <Text variant="caption" style={[styles.tableCell, styles.tableColDay]}>
                     {row.day}
                   </Text>
-                  <Text style={[styles.tableCell, styles.tableColFocus]}>
+                  <Text variant="caption" style={[styles.tableCell, styles.tableColFocus]}>
                     {row.focus}
                   </Text>
-                  <Text style={[styles.tableCell, styles.tableColActivity]}>
+                  <Text variant="caption" style={[styles.tableCell, styles.tableColActivity]}>
                     {row.activity}
                   </Text>
                 </View>
@@ -406,23 +416,26 @@ export default function Page() {
     if (item.kind === "weeklyPrompt") {
       return (
         <View style={styles.messageGroup}>
-          <Text style={[styles.timeAbove, styles.timeLeft]}>
+          <Text variant="caption" color="secondary" style={[styles.timeAbove, styles.timeLeft]}>
             {timeAgo(item.timestamp)}
           </Text>
 
           <View style={[styles.bubble, styles.botBubble]}>
             <View style={styles.bubbleHeader}>
-              <Text style={styles.label}>Bot</Text>
+              <Text variant="caption" color="secondary" style={styles.label}>Bot</Text>
             </View>
 
-            <Text style={styles.msg}>{item.text}</Text>
+            <Text variant="body" style={styles.msg}>{item.text}</Text>
 
-            <TouchableOpacity
+            <Button
+              appearance="outline"
+              size="small"
               style={styles.inlineButton}
               onPress={() => handleViewWeeklyPlan(item.relatedToId)}
+              accessibilityLabel="View daily plan"
             >
-              <Text style={styles.inlineButtonText}>View</Text>
-            </TouchableOpacity>
+              View
+            </Button>
           </View>
         </View>
       );
@@ -432,6 +445,8 @@ export default function Page() {
     return (
       <View style={styles.messageGroup}>
         <Text
+          variant="caption"
+          color="secondary"
           style={[
             styles.timeAbove,
             item.from === "user" ? styles.timeRight : styles.timeLeft,
@@ -447,39 +462,54 @@ export default function Page() {
           ]}
         >
           <View style={styles.bubbleHeader}>
-            <Text style={styles.label}>
+            <Text variant="caption" color="secondary" style={styles.label}>
               {item.from === "user" ? "You" : "Bot"}
             </Text>
           </View>
 
-          <Text style={styles.msg}>{item.text}</Text>
+          <Text variant="body" style={styles.msg}>{item.text}</Text>
+
+          {/* Save to Notes button for bot messages */}
+          {item.from === "bot" && (
+            <SaveToNotesButton
+              content={item.text}
+              messageId={item.id}
+              conversationId={conversationId || undefined}
+              onSaved={() => {
+                // Trigger sidebar refresh to show the newly saved note
+                setSidebarRefreshTrigger((prev) => prev + 1);
+              }}
+            />
+          )}
 
           {/* Learning plan UI */}
           {item.from === "bot" && item.learningPlan && (
             <View style={styles.learningContainer}>
-              <Text style={styles.learningTitle}>
+              <Text variant="body" weight="bold" style={styles.learningTitle}>
                 {item.learningPlan.topic} – {item.learningPlan.level}
               </Text>
-              <Text style={styles.learningMeta}>
+              <Text variant="caption" color="secondary" style={styles.learningMeta}>
                 Duration: {item.learningPlan.durationWeeks} weeks
               </Text>
 
-              <Text style={styles.learningSectionTitle}>Curriculum</Text>
+              <Text variant="caption" weight="semibold" style={styles.learningSectionTitle}>Curriculum</Text>
               {item.learningPlan.modules.map((mod, index) => (
                 <View key={index} style={styles.learningModule}>
-                  <Text style={styles.learningModuleTitle}>
+                  <Text variant="caption" weight="semibold" style={styles.learningModuleTitle}>
                     {index + 1}. {mod.title}
                   </Text>
-                  <Text style={styles.learningModuleDesc}>
+                  <Text variant="caption" color="secondary" style={styles.learningModuleDesc}>
                     {mod.description}
                   </Text>
                 </View>
               ))}
 
-              <Text style={styles.learningSectionTitle}>YouTube videos</Text>
+              <Text variant="caption" weight="semibold" style={styles.learningSectionTitle}>YouTube videos</Text>
               {item.learningPlan.youtubeLinks.map((url, index) => (
                 <Text
                   key={index}
+                  variant="caption"
+                  color="brand"
                   style={styles.linkText}
                   onPress={() => Linking.openURL(url)}
                 >
@@ -487,12 +517,14 @@ export default function Page() {
                 </Text>
               ))}
 
-              <Text style={styles.learningSectionTitle}>
+              <Text variant="caption" weight="semibold" style={styles.learningSectionTitle}>
                 LinkedIn Learning videos
               </Text>
               {item.learningPlan.linkedinLinks.map((url, index) => (
                 <Text
                   key={index}
+                  variant="caption"
+                  color="brand"
                   style={styles.linkText}
                   onPress={() => Linking.openURL(url)}
                 >
@@ -504,12 +536,12 @@ export default function Page() {
 
           {/* Optional: show some info from the Agent SDK activity */}
           {item.from === "bot" && item.agentActivity && (
-            <View style={{ marginTop: 8 }}>
-              <Text style={styles.learningSectionTitle}>
+            <View style={{ marginTop: FluentSpacing.s }}>
+              <Text variant="caption" weight="semibold" style={styles.learningSectionTitle}>
                 Agent Activity (SDK)
               </Text>
               {item.agentActivity.text ? (
-                <Text style={styles.learningModuleDesc}>
+                <Text variant="caption" color="secondary" style={styles.learningModuleDesc}>
                   {item.agentActivity.text}
                 </Text>
               ) : null}
@@ -530,91 +562,79 @@ export default function Page() {
   // =============================================
   const inputTooLong = input.length > MAX_MESSAGE_LENGTH;
 
-  const renderAuthState = () => {
-    if (authenticating) {
-      return (
+  // If no session, show loading while redirecting to login
+  if (!session) {
+    return (
+      <SafeAreaView style={styles.container}>
         <View style={[styles.list, { flex: 1, justifyContent: "center" }]}>
-          <ActivityIndicator />
-          <Text style={{ marginTop: 12 }}>Signing in with Microsoft Entra…</Text>
-        </View>
-      );
-    }
-
-    if (!session) {
-      return (
-        <View style={[styles.list, { flex: 1, justifyContent: "center" }]}>
-          <Text style={{ marginBottom: 12, fontWeight: "600" }}>
-            Sign in with Microsoft Entra to start chatting.
+          <ActivityIndicator color={FluentColors.brand.primary} />
+          <Text variant="body" color="secondary" style={{ marginTop: FluentSpacing.m, textAlign: "center" }}>
+            Redirecting to sign-in...
           </Text>
-          {authError ? (
-            <Text style={{ color: "#dc2626", marginBottom: 8 }}>{authError}</Text>
-          ) : null}
-          <TouchableOpacity
-            onPress={() => ensureSession().catch(() => null)}
-            style={styles.button}
-          >
-            <Text style={styles.buttonText}>Sign in with Microsoft</Text>
-          </TouchableOpacity>
         </View>
-      );
-    }
-
-    return null;
-  };
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView
-        style={styles.container}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
-        {renderAuthState() ?? (
-          <>
-            <FlatList
-              data={messages}
-              keyExtractor={(item) => item.id}
-              renderItem={renderItem}
-              contentContainerStyle={styles.list}
-              extraData={tick}
+      <View style={{ flexDirection: "row", flex: 1 }}>
+        {/* Sidebar */}
+        <SavedNotesSidebar
+          isVisible={sidebarVisible}
+          onToggle={() => setSidebarVisible(!sidebarVisible)}
+          refreshTrigger={sidebarRefreshTrigger}
+        />
+
+        {/* Main Chat Area */}
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <FlatList
+            data={messages}
+            keyExtractor={(item) => item.id}
+            renderItem={renderItem}
+            contentContainerStyle={styles.list}
+            extraData={tick}
+          />
+
+          <View style={styles.inputRow}>
+          <View style={{ flex: 1 }}>
+            <TextInput
+              value={input}
+              onChangeText={setInput}
+              placeholder="Type a message..."
+              multiline
+              editable={!!session}
+              containerStyle={{ marginBottom: FluentSpacing.xs }}
+              inputStyle={styles.input}
             />
 
-            <View style={styles.inputRow}>
-              <View style={{ flex: 1 }}>
-                <TextInput
-                  style={styles.input}
-                  value={input}
-                  onChangeText={setInput}
-                  placeholder="Type a message..."
-                  multiline
-                  editable={!!session}
-                />
+            <Text
+              variant="caption"
+              color={inputTooLong ? "error" : "secondary"}
+              style={styles.charCount}
+            >
+              {input.length}/{MAX_MESSAGE_LENGTH}
+              {inputTooLong ? " – too long" : ""}
+            </Text>
+          </View>
 
-                <Text
-                  style={[
-                    styles.charCount,
-                    inputTooLong && styles.charCountExceeded,
-                  ]}
-                >
-                  {input.length}/{MAX_MESSAGE_LENGTH}
-                  {inputTooLong ? " – too long" : ""}
-                </Text>
-              </View>
-
-              <TouchableOpacity
-                onPress={sendMessage}
-                disabled={!input.trim() || isSending || inputTooLong || !session}
-                style={[
-                  styles.button,
-                  (!input.trim() || isSending || inputTooLong || !session) &&
-                    styles.buttonDisabled,
-                ]}
-              >
-                <Text style={styles.buttonText}>{isSending ? "..." : "Send"}</Text>
-              </TouchableOpacity>
-            </View>
-          </>
-        )}
-      </KeyboardAvoidingView>
+          <Button
+            appearance="primary"
+            onPress={sendMessage}
+            disabled={!input.trim() || isSending || inputTooLong || !session}
+            loading={isSending}
+            style={styles.sendButton}
+            accessibilityLabel="Send message"
+            accessibilityHint="Sends your message to the chatbot"
+          >
+            Send
+          </Button>
+        </View>
+        </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }
